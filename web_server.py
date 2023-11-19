@@ -1,14 +1,19 @@
-# use python socket lib
+#!/bin/python3
 from socket import *
+import os
+import time
+from email.utils import parsedate, formatdate
 
 # Assign a Server Port
-serverPort = 3000
+serverPort = 8080
 
 # Create TCP welcoming socket
 serverSocket = socket(AF_INET,SOCK_STREAM)
 
+forbiddenList = ["secret.html"]
+
 # Bind the server address & server port to the socket
-serverSocket.bind(('192.168.56.1',serverPort))
+serverSocket.bind(('127.0.0.1',serverPort))
 
 # Server begins listerning for incoming TCP connections
 # set 1 for at most 1 connection at a time
@@ -22,7 +27,7 @@ while True:  # Loop forever
 
     try:
         # Receive request message from client
-        message = connectionSocket.recv(1024)
+        message = connectionSocket.recv(1024).decode('utf-8')
         print('The request message from client:', message)
 
         if not message:
@@ -37,8 +42,31 @@ while True:  # Loop forever
         testFile = message_parts[1][1:]
         print('The test file from client:', testFile)
 
+        # Get metadata last modified of the testfile we have in our OS.
+        lastModified = os.path.getmtime(testFile)
+        lastModifiedString = formatdate(timeval = lastModified, localtime = False, usegmt = True)
+
+        if "If-Modified-Since" in message:
+            modifiedTimeString = message.split("If-Modified-Since")[1].split()[0]
+            modifiedTime = parsedate(modifiedTimeString)
+            if lastModified <= time.mktime(modifiedTime):
+                connectionSocket.send("HTTP/1.1 304 Not Modified\r\n\r\n".encode())
+                connectionSocket.close()
+                continue
+
+        if "Content-Length" not in message:
+            connectionSocket.send("HTTP/1.1 411 Length Required\r\n\r\n".encode())
+            connectionSocket.close()
+            continue
+
+        if testFile in forbiddenList:
+            connectionSocket.send("HTTP/1.1 403 Forbidden\r\n\r\n".encode())
+            connectionSocket.close()
+            continue
+
+        print(testFile)
         # Open file and get html data
-        with open(testFile, 'rb') as file:  # 'rb' is for reading in binary mode
+        with open(testFile, 'rb') as file:
             testHTML = file.read()
 
         # Send HTTP response header to client
@@ -47,7 +75,7 @@ while True:  # Loop forever
         connectionSocket.send(testHTML)
 
         connectionSocket.close()
-    
+
     except IOError:
         # Send HTTP response header for file not found to client
         connectionSocket.send("HTTP/1.1 404 Not Found\r\n\r\n".encode())
@@ -56,4 +84,6 @@ while True:  # Loop forever
         # Log the error and send a 400 Bad Request response
         print(e)
         connectionSocket.send("HTTP/1.1 400 Bad Request\r\n\r\n".encode())
+        connectionSocket.close()
+    except KeyboardInterrupt:
         connectionSocket.close()
