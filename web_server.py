@@ -23,7 +23,7 @@ serverSocket.bind(('127.0.0.1',serverPort))
 serverSocket.listen(1)
 
 while True:  # Loop forever
-    print('The server ready:')
+    print('-----------------------------------------------------\n The Server ready:')
 
     # Set up connection for the client, a new socket
     connectionSocket, addr = serverSocket.accept()
