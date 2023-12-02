@@ -2,6 +2,10 @@ import socket
 import os
 import time
 from email.utils import formatdate,parsedate
+import threading
+
+#lock for threads
+lock = threading.Lock()
 
 # Proxy Server Configuration
 proxy_server_port = 80
@@ -16,11 +20,8 @@ proxy_socket.listen(1)
 # Cache for storing web pages
 cache = {}
 
-while True:
-    print('-----------------------------------------------------\n The Proxy Server ready:')
-
-    # Accepting connection from client
-    connection_socket, client_address = proxy_socket.accept()
+def handle_connection(connection_socket):
+    print(f"Thread ID: {threading.get_ident()}")
 
     try:
         # Receiving request from client
@@ -51,7 +52,7 @@ while True:
                 if time.mktime(last_modified_time) <= time.mktime(modifiedTime):
                     connection_socket.send("HTTP/1.1 304 Not Modified\r\n\r\n".encode())
                     connection_socket.close()
-                    continue
+                    return
         else:
             # check modify time in cache
             if requested_resource in cache:
@@ -63,7 +64,7 @@ while True:
                     if time.time() - last_modified < 60:  # Assume 60 seconds cache validity for simplicity
                         connection_socket.send("HTTP/1.1 304 Not Modified\r\n\r\n".encode())
                         connection_socket.close()
-                        continue  
+                        return
 
         # Forwarding Requests: Forwarding HTTP Request to Originator Server
         originator_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -99,13 +100,15 @@ while True:
         if status_code == 200:
             # Caching Mechanism:  store copies of requested web pages
             body = "\r\n".join(response_lines[response_lines.index("") + 1:])
-            cache[requested_resource] = (body.encode(), time.time())
+            lock.acquire
+            with lock:
+                cache[requested_resource] = (body.encode(), time.time())
 
             # Send response to client
             connection_socket.send("HTTP/1.1 200 OK\r\n\r\n".encode())
             connection_socket.send(body.encode())
         else:
-            # Send error response to client, like 
+            # Send error response to client, like
             connection_socket.send(f"HTTP/1.1 {status_code} {status_line.split(' ', 2)[2]}\r\n\r\n".encode())
 
         connection_socket.close()
@@ -114,3 +117,15 @@ while True:
         print(f"Error: {e}")
         connection_socket.send("HTTP/1.1 500 Internal Server Error\r\n\r\n".encode())
         connection_socket.close()
+        return
+
+while True:
+    print('-----------------------------------------------------\n The Proxy Server ready:')
+    try:
+        # Accepting connection from client
+        connection_socket, client_address = proxy_socket.accept()
+        #Make each connection a thread
+        threading.Thread(target=handle_connection, args=(connection_socket,)).start()
+    except KeyboardInterrupt:
+        print("\nBye!")
+        exit()
